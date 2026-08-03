@@ -1,0 +1,70 @@
+# Composite action: Pack and push NuGet packages to a GitHub Packages feed.
+
+name: "Build & Push NuGet Packages"
+description: "Creates NuGet packages via dotnet pack and pushes them to a GitHub Packages feed"
+
+inputs:
+  buildConfiguration:
+    description: "Build configuration (e.g. Release)"
+    required: true
+  packageVersion:
+    description: "Version string to stamp on the packages (from GitVersion)"
+    required: true
+  packagesToPack:
+    description: "Path to solution or project file to pack"
+    required: true
+  publishFeed:
+    description: "NuGet feed URL to push packages to"
+    required: false
+    default: "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+  nugetAuthToken:
+    description: "GitHub token (or PAT) with write:packages permission"
+    required: true
+  dotnetNugetPushArgs:
+    description: "Extra arguments forwarded verbatim to dotnet nuget push"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create NuGet packages
+      shell: bash
+      env:
+        PACKAGE_VERSION: ${{ inputs.packageVersion }}
+      run: |
+        set -e
+        dotnet pack ${{ inputs.packagesToPack }} \
+          --configuration ${{ inputs.buildConfiguration }} \
+          --output "${{ github.workspace }}/nupkgs" \
+          /p:PackageVersion="${PACKAGE_VERSION}" \
+          --verbosity minimal
+
+    - name: Check for packages to push
+      id: check-packages
+      shell: bash
+      run: |
+        if compgen -G "${{ github.workspace }}/nupkgs/*.nupkg" > /dev/null; then
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "Detected NuGet packages to push:"
+          find "${{ github.workspace }}/nupkgs" -name "*.nupkg"
+        else
+          echo "found=false" >> "$GITHUB_OUTPUT"
+          echo "No NuGet packages found — nothing to push."
+        fi
+
+    - name: Push NuGet packages
+      if: steps.check-packages.outputs.found == 'true'
+      shell: bash
+      env:
+        NUGET_AUTH_TOKEN: ${{ inputs.nugetAuthToken }}
+      run: |
+        set -e
+        find "${{ github.workspace }}/nupkgs" -name "*.nupkg" | while read pkg; do
+          echo "Pushing $pkg"
+          dotnet nuget push "$pkg" \
+            --source "${{ inputs.publishFeed }}" \
+            --api-key "${NUGET_AUTH_TOKEN}" \
+            --skip-duplicate \
+            ${{ inputs.dotnetNugetPushArgs }}
+        done

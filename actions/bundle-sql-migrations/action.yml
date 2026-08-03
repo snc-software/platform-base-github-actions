@@ -1,0 +1,30 @@
+name: "Bundle SQL Migrations"
+description: "Copies a raw migrations directory and uploads as an artifact"
+
+inputs:
+  migrationsDirectory:
+    description: "Path to a raw SQL migrations directory to copy"
+    required: false
+    default: ""
+  outputDir:
+    description: "Output directory for migration artifacts"
+    required: false
+    default: "./migrations"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Copy raw migrations directory
+      shell: bash
+      run: |
+        set -e
+        mkdir -p ${{ inputs.outputDir }}
+        cp ${{ inputs.migrationsDirectory }}/* ${{ inputs.outputDir }}/
+
+    - name: Upload raw migrations
+      uses: actions/upload-artifact@v4
+      with:
+        name: sql-migrations
+        path: ${{ inputs.outputDir }}
+        retention-days: 30
+        if-no-files-found: warn

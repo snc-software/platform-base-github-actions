@@ -1,0 +1,274 @@
+# Reusable workflow: Build, test, and optionally publish a .NET API service.
+# Caller repositories reference this with:
+#   uses: snc-software/platform-base-github-actions/.github/workflows/build-dotnet-service.yml@main
+
+name: Build .NET Service
+
+on:
+  workflow_call:
+    inputs:
+      buildConfiguration:
+        description: "Build configuration (Release or Debug)"
+        type: string
+        required: false
+        default: "Release"
+      codeCoverageThreshold:
+        description: "Minimum line coverage percentage required"
+        type: number
+        required: false
+        default: 80
+      buildPackages:
+        description: "Whether to pack and push NuGet packages (e.g. Api.Clients, Events)"
+        type: boolean
+        required: false
+        default: false
+      bundleSQLMigrations:
+        description: "Whether to bundle SQL migrations as a build artifact"
+        type: boolean
+        required: false
+        default: false
+      migrationProjectDirectory:
+        description: "Path to the EF Core project to bundle migrations from"
+        type: string
+        required: false
+        default: ""
+      migrationsDirectory:
+        description: "Path to a raw SQL migrations directory to copy"
+        type: string
+        required: false
+        default: ""
+      actionsTag:
+        description: "platform-base-github-actions branch/tag to use"
+        type: string
+        required: false
+        default: "main"
+
+jobs:
+  build-and-test:
+    name: Build, Test & Package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      packages: write
+    outputs:
+      semver: ${{ steps.gitversion.outputs.FullSemVer }}
+      nuget-version: ${{ steps.gitversion.outputs.NuGetVersion }}
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout Repository
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history required for GitVersion
+          persist-credentials: true
+
+      # -----------------------------------------------------------------------
+      # Checkout Version of Actions
+      # -----------------------------------------------------------------------
+      - name: Checkout platform actions
+        uses: actions/checkout@v4
+        with:
+          repository: snc-software/platform-base-github-actions
+          ref: ${{ inputs.actionsTag }}
+          path: .platform-actions
+
+      - name: Verify platform actions checkout
+        shell: bash
+        run: |
+          echo "=== platformRef: ${{ inputs.actionsTag }}"
+
+      # -----------------------------------------------------------------------
+      # Git Version
+      # -----------------------------------------------------------------------
+      - name: Run GitVersion
+        id: gitversion
+        uses: ./.platform-actions/actions/gitversion
+
+      # -----------------------------------------------------------------------
+      # Install .NET 10
+      # -----------------------------------------------------------------------
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.x"
+
+      # -----------------------------------------------------------------------
+      # Authenticate against GitHub Packages feed
+      # -----------------------------------------------------------------------
+      - name: Authenticate against GitHub Packages
+        shell: bash
+        env:
+          NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet nuget update source "github" \
+          --username "${{ github.actor }}" \
+          --password "${NUGET_AUTH_TOKEN}" \
+          --store-password-in-clear-text
+
+      # -----------------------------------------------------------------------
+      # Format check
+      # -----------------------------------------------------------------------
+      - name: Check formatting
+        uses: ./.platform-actions/actions/dotnet-format-check
+        with:
+          working-directory: "." # optional, defaults to repo root
+
+      # -----------------------------------------------------------------------
+      # Find Solution File
+      # -----------------------------------------------------------------------
+      - name: Find solution file
+        id: find-solution
+        shell: bash
+        run: |
+          slnx=$(find . -name "*.slnx" | head -1)
+          echo "Found solution: $slnx"
+          echo "path=$slnx" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Restore
+      # -----------------------------------------------------------------------
+      - name: Restore dependencies
+        shell: bash
+        run: dotnet restore "${{ steps.find-solution.outputs.path }}"
+
+      # -----------------------------------------------------------------------
+      # Build
+      # -----------------------------------------------------------------------
+      - name: Build
+        shell: bash
+        run: |
+          dotnet build "${{ steps.find-solution.outputs.path }}" \
+            --configuration ${{ inputs.buildConfiguration }} \
+            --no-restore
+
+      # -----------------------------------------------------------------------
+      # Run tests with Coverlet (cobertura output)
+      # -----------------------------------------------------------------------
+      - name: Run tests
+        shell: bash
+        env:
+          SERVICE_TEST_ENV: ci
+          ASPNETCORE_ENVIRONMENT: ci
+        run: |
+          dotnet test "${{ steps.find-solution.outputs.path }}" \
+            --configuration ${{ inputs.buildConfiguration }} \
+            --no-build \
+            --logger "console;verbosity=detailed" \
+            --logger "trx;LogFileName=test-results.trx" \
+            --collect "XPlat Code Coverage" \
+            --settings coverlet.runsettings \
+            /maxcpucount:1
+
+      # -----------------------------------------------------------------------
+      # Publish test results
+      # -----------------------------------------------------------------------
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: .NET Test Results
+          path: "**/*.trx"
+          reporter: dotnet-trx
+
+      # -----------------------------------------------------------------------
+      # Generate coverage report
+      # -----------------------------------------------------------------------
+      - name: Generate coverage report
+        uses: danielpalme/ReportGenerator-GitHub-Action@5
+        with:
+          reports: "**/coverage.cobertura.xml"
+          targetdir: "coverage-report"
+          reporttypes: "Html;Clover;Cobertura;MarkdownSummaryGithub"
+
+      # -----------------------------------------------------------------------
+      # Write coverage summary to job summary page
+      # -----------------------------------------------------------------------
+      - name: Add coverage summary to job
+        if: always()
+        shell: bash
+        run: cat 'coverage-report/SummaryGithub.md' >> "$GITHUB_STEP_SUMMARY"
+
+      # -----------------------------------------------------------------------
+      # Upload coverage report artifact
+      # -----------------------------------------------------------------------
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report
+          retention-days: 30
+
+      # -----------------------------------------------------------------------
+      # Check code coverage threshold
+      # -----------------------------------------------------------------------
+      - name: Check code coverage
+        uses: themichaelhall/check-code-coverage@v2.0.0
+        with:
+          report: coverage-report/Clover.xml
+          required-percentage: ${{ inputs.codeCoverageThreshold }}
+
+      # -----------------------------------------------------------------------
+      # Bundle SQL migrations (optional)
+      # -----------------------------------------------------------------------
+      - name: Bundle SQL migrations
+        if: inputs.bundleSQLMigrations == true
+        uses: ./.platform-actions/actions/bundle-sql-migrations
+        with:
+          migrationProjectDirectory: ${{ inputs.migrationProjectDirectory }}
+          migrationsDirectory: ${{ inputs.migrationsDirectory }}
+          runAttempt: ${{ github.run_attempt }}
+
+      # -----------------------------------------------------------------------
+      # Pack and push NuGet packages (optional, PRs = pre-release, main = release)
+      # -----------------------------------------------------------------------
+      - name: Build & push NuGet packages
+        if: inputs.buildPackages == true && (github.ref == 'refs/heads/main' || github.event_name == 'pull_request')
+        uses: ./.platform-actions/actions/build-push-nuget
+        with:
+          buildConfiguration: ${{ inputs.buildConfiguration }}
+          packageVersion: ${{ steps.gitversion.outputs.NuGetVersion }}
+          packagesToPack: ${{ steps.find-solution.outputs.path }}
+          publishFeed: "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+          nugetAuthToken: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Create GitHub Release (main branch only, after successful build)
+  # ---------------------------------------------------------------------------
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && needs.build-and-test.result == 'success'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Create Git tag
+        run: |
+          set -e
+          echo "=== Tagging main branch with ${{ needs.build-and-test.outputs.semver }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ needs.build-and-test.outputs.semver }}" --force
+          git push origin --tags --force
+          echo "=== Last 10 tags"
+          git tag --list | sort -V | tail -10
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build-and-test.outputs.semver }}
+          name: ${{ needs.build-and-test.outputs.semver }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

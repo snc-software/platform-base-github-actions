@@ -1,0 +1,67 @@
+# Composite action: Install GitVersion and expose version outputs.
+# Outputs:
+#   FullSemVer   – full semantic version string  (e.g. 1.2.3-PullRequest.4)
+#   NuGetVersion – NuGet-compatible version      (e.g. 1.2.3-PullRequest0004)
+
+name: 'GitVersion'
+description: 'Runs GitVersion in Mainline mode and exposes version variables as step outputs'
+
+inputs:
+  toolVersion:
+    description: 'GitVersion.Tool NuGet version to install'
+    required: false
+    default: '5.12.0'
+
+outputs:
+  FullSemVer:
+    description: 'Full semantic version (e.g. 1.2.3-PullRequest.4)'
+    value: ${{ steps.set-outputs.outputs.FullSemVer }}
+  NuGetVersion:
+    description: 'NuGet-compatible version (e.g. 1.2.3-PullRequest0004)'
+    value: ${{ steps.set-outputs.outputs.NuGetVersion }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install and run GitVersion
+      shell: bash
+      run: |
+        set -e
+        trap "echo '--- GitVersion.json ---'; cat GitVersion.json; exit" EXIT
+
+        # Write Mainline mode config so every commit on main gets a bumped version
+        echo "mode: MainLine" >> GitVersion.yml
+        echo "--- GitVersion.yml ---"
+        cat GitVersion.yml
+
+        # Install tool locally (avoids needing global .NET tools path on PATH)
+        dotnet tool install GitVersion.Tool \
+          --version ${{ inputs.toolVersion }} \
+          --tool-path .
+
+        ./dotnet-gitversion > GitVersion.json
+
+    - name: Set version outputs
+      id: set-outputs
+      shell: bash
+      run: |
+        set -e
+        SEM_VER=$(grep -o '"FullSemVer":\s*"[^"]*' GitVersion.json | grep -o '[^"]*$')
+        NUGET_VER=$(grep -o '"NuGetVersion":\s*"[^"]*' GitVersion.json | grep -o '[^"]*$')
+
+        echo "FullSemVer=${SEM_VER}"   >> "$GITHUB_OUTPUT"
+        echo "NuGetVersion=${NUGET_VER}" >> "$GITHUB_OUTPUT"
+
+        # Surface versions in the job summary for easy visibility
+        echo "### GitVersion" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Variable | Value |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| FullSemVer | \`${SEM_VER}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| NuGetVersion | \`${NUGET_VER}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload GitVersion metadata
+      uses: actions/upload-artifact@v4
+      with:
+        name: gitversion
+        path: GitVersion.json
+        retention-days: 7

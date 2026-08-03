@@ -1,2 +1,2 @@
 # platform-base-github-actions
-Shared Github Actions
+Reusable GitHub actions
