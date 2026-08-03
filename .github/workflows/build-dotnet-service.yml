@@ -49,7 +49,6 @@ jobs:
       packages: write
     outputs:
       semver: ${{ steps.gitversion.outputs.FullSemVer }}
-      nuget-version: ${{ steps.gitversion.outputs.NuGetVersion }}
 
     steps:
       # -----------------------------------------------------------------------
@@ -223,7 +222,7 @@ jobs:
         uses: ./.platform-actions/actions/build-push-nuget
         with:
           buildConfiguration: ${{ inputs.buildConfiguration }}
-          packageVersion: ${{ steps.gitversion.outputs.NuGetVersion }}
+          packageVersion: ${{ steps.gitversion.outputs.FullSemVer }}
           packagesToPack: ${{ steps.find-solution.outputs.path }}
           publishFeed: "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
           nugetAuthToken: ${{ secrets.GITHUB_TOKEN }}
