@@ -14,12 +14,26 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Validate migrations directory
+      shell: bash
+      run: |
+        set -e
+        if [ -z "${{ inputs.migrationsDirectory }}" ]; then
+          echo "::error::migrationsDirectory input is required and cannot be empty"
+          exit 1
+        fi
+        resolved="$(cd "${{ inputs.migrationsDirectory }}" && pwd)"
+        if [ "$resolved" = "/" ]; then
+          echo "::error::migrationsDirectory resolves to the filesystem root ('$resolved') — refusing to bundle"
+          exit 1
+        fi
+
     - name: Copy raw migrations directory
       shell: bash
       run: |
         set -e
-        mkdir -p ${{ inputs.outputDir }}
-        cp ${{ inputs.migrationsDirectory }}/* ${{ inputs.outputDir }}/
+        mkdir -p "${{ inputs.outputDir }}"
+        cp "${{ inputs.migrationsDirectory }}"/* "${{ inputs.outputDir }}"/
 
     - name: Upload raw migrations
       uses: actions/upload-artifact@v4

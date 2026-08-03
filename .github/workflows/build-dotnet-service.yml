@@ -27,11 +27,6 @@ on:
         type: boolean
         required: false
         default: false
-      migrationProjectDirectory:
-        description: "Path to the EF Core project to bundle migrations from"
-        type: string
-        required: false
-        default: ""
       migrationsDirectory:
         description: "Path to a raw SQL migrations directory to copy"
         type: string
@@ -218,9 +213,7 @@ jobs:
         if: inputs.bundleSQLMigrations == true
         uses: ./.platform-actions/actions/bundle-sql-migrations
         with:
-          migrationProjectDirectory: ${{ inputs.migrationProjectDirectory }}
           migrationsDirectory: ${{ inputs.migrationsDirectory }}
-          runAttempt: ${{ github.run_attempt }}
 
       # -----------------------------------------------------------------------
       # Pack and push NuGet packages (optional, PRs = pre-release, main = release)
