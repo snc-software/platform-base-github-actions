@@ -6,36 +6,33 @@
 # matching the previous hand-rolled GitVersion.Tool setup. Repos that ship their own GitVersion.yml
 # can override this by setting their own `mode` in that file and passing useOverrideConfig: false.
 
-name: 'GitVersion'
-description: 'Runs GitVersion (via the gittools/actions marketplace action) and exposes version variables as step outputs'
+name: "GitVersion"
+description: "Runs GitVersion (via the gittools/actions marketplace action) and exposes version variables as step outputs"
 
 inputs:
   versionSpec:
-    description: 'GitVersion version to install'
+    description: "GitVersion version to install"
     required: false
-    default: '6.x'
+    default: "6.x"
   useOverrideConfig:
-    description: 'Whether to force Mainline versioning mode regardless of any GitVersion.yml in the caller repo'
+    description: "Whether to force Mainline versioning mode regardless of any GitVersion.yml in the caller repo"
     required: false
-    default: 'true'
+    default: "true"
   configFilePath:
-    description: 'Optional path to a GitVersion.yml config file (defaults to GitVersion.yml at repo root)'
+    description: "Optional path to a GitVersion.yml config file (defaults to GitVersion.yml at repo root)"
     required: false
-    default: ''
+    default: ""
 
 outputs:
   FullSemVer:
-    description: 'Full semantic version (e.g. 1.2.3-PullRequest.4)'
-    value: ${{ steps.gitversion.outputs.fullSemVer }}
-  NuGetVersion:
-    description: 'NuGet-compatible version. NuGet has supported full SemVer 2.0 package versions since NuGet 4.3, so this is the same value as FullSemVer (GitVersion 6 removed its legacy NuGetVersion output).'
+    description: "Full semantic version (e.g. 1.2.3-PullRequest.4)"
     value: ${{ steps.gitversion.outputs.fullSemVer }}
   SemVer:
-    description: 'Semantic version without build metadata (e.g. 1.2.3-PullRequest.4 without commit metadata)'
+    description: "Semantic version without build metadata (e.g. 1.2.3-PullRequest.4 without commit metadata)"
     value: ${{ steps.gitversion.outputs.semVer }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Setup GitVersion
       uses: gittools/actions/gitversion/setup@v4.7.0
