@@ -1,0 +1,16 @@
+name: 'Format Check'
+description: 'Runs dotnet format --verify-no-changes to ensure code is correctly formatted'
+
+inputs:
+  working-directory:
+    description: 'Directory to run dotnet format in'
+    required: false
+    default: '.'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Format check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: dotnet format --verify-no-changes --no-restore --verbosity diag
