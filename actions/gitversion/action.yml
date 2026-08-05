@@ -33,8 +33,6 @@ runs:
     - name: Run GitVersion
       id: gitversion
       uses: gittools/actions/gitversion/execute@v4.7.0
-      with:
-        overrideConfig: mode=Mainline
 
     - name: Add version summary
       shell: bash
